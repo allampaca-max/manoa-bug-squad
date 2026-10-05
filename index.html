@@ -1,0 +1,1436 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#131a1f">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="벌레 퇴치단">
+<!-- artifact:start — from here down (minus the </head><body> pair) is what scripts/build-artifact.sh publishes as the Claude artifact -->
+<title>마노아 벌레 퇴치단</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gowun+Dodum&family=Jua&family=Pixelify+Sans:wght@500;700&display=swap">
+<style>
+/* Layout: one-screen battle. Top bar → pixel-painted Manoa field (heroes left, bugs right) → card dock.
+   Portrait phones put pile/energy/end-turn in a strip above a full-width hand;
+   landscape screens flank the hand with energy + draw pile (left) and end turn + discard (right). */
+:root{
+  color-scheme:dark;
+  --night:#131a1f;
+  --slate:#1f2a30;
+  --line:#3d5058;
+  --sand:#f3ead3;
+  --sand-dim:#a9a38f;
+  --plumeria:#f6c453;
+  --hibiscus:#e2493a;
+  --surf:#7cc6ec;
+  --weak:#f3973a;
+  --ok:#93f08b;
+  --font-display:"Jua","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",sans-serif;
+  --font-body:"Gowun Dodum","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",sans-serif;
+  --font-pixel:"Pixelify Sans",ui-monospace,"SF Mono",Menlo,monospace;
+  --card-w:clamp(76px, min(23vw, 15.5vh), 150px);
+  --card-h:calc(var(--card-w) * 1.38);
+}
+html,body{height:100%}
+html{box-sizing:border-box;overscroll-behavior:none;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+*,*::before,*::after{box-sizing:inherit}
+[hidden]{display:none!important}
+body{margin:0;background:var(--night);color:var(--sand);font-family:var(--font-body);overflow:hidden;overscroll-behavior:none;
+  -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent}
+button{font:inherit;color:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}
+button:focus-visible,.card:focus-visible{outline:2px solid var(--plumeria);outline-offset:2px}
+
+.game{height:100%;max-width:1600px;margin-inline:auto;display:grid;grid-template-rows:auto minmax(0,1fr) auto;touch-action:none}
+
+/* ---------- top bar ---------- */
+.topbar{display:flex;align-items:center;gap:12px;padding:6px 16px;min-height:42px;
+  background:linear-gradient(#0d1317,#18222a);border-bottom:2px solid #090d10;font-size:clamp(12px, .9vw + 8px, 16px)}
+.who{display:flex;align-items:baseline;gap:6px;min-width:0}
+.who b{font-family:var(--font-display);font-weight:400;font-size:1.3em;letter-spacing:.02em;color:var(--sand)}
+.who span{color:var(--sand-dim);font-size:.8em;white-space:nowrap}
+.where{flex:1;min-width:0;text-align:center;color:var(--sand-dim);font-size:.88em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.turn{font-family:var(--font-pixel);color:var(--sand);white-space:nowrap}
+.turn b{color:var(--plumeria)}
+.icon-btn{width:34px;height:34px;border-radius:8px;border:1px solid var(--line);background:#1b252b;display:grid;place-items:center;padding:0}
+.icon-btn i{display:block;width:16px;height:2px;background:var(--sand);box-shadow:0 -5px 0 var(--sand),0 5px 0 var(--sand)}
+
+/* ---------- battlefield ---------- */
+.field{position:relative;overflow:hidden;container-type:size;background:#2b5a3c;
+  --sprite:clamp(44px, min(17cqw, 25cqh), 150px)}
+#bg{position:absolute;inset:0;width:100%;height:100%;image-rendering:pixelated;image-rendering:crisp-edges}
+.field::after{content:"";position:absolute;inset:auto 0 0 0;height:28%;pointer-events:none;z-index:1;
+  background:linear-gradient(transparent,rgba(9,13,16,.55))}
+.version{position:absolute;top:10px;right:14px;z-index:2;font-family:var(--font-pixel);font-size:12px;color:#fff;opacity:.75;text-align:right;line-height:1.3;text-shadow:0 1px 0 #000}
+@media (max-width:799px){.version{display:none}}
+
+.lineup{position:absolute;left:max(12px,3cqw);right:max(12px,3cqw);bottom:max(10px,6cqh);z-index:2;
+  display:flex;justify-content:space-between;align-items:flex-end}
+.side{display:flex;align-items:flex-end;gap:max(4px,1.5cqw)}
+/* tall (portrait) field: bugs stand further back on the right, heroes in front on the left */
+@container (max-aspect-ratio:5/6){
+  .lineup{--sprite:clamp(56px, min(27cqw, 17cqh), 140px);flex-direction:column-reverse;align-items:stretch;gap:3cqh}
+  .side.heroes{align-self:flex-start}
+  .side.enemies{align-self:flex-end}
+}
+
+.unit{width:calc(var(--sprite) * 1.22);display:flex;flex-direction:column;align-items:center;gap:3px;position:relative;cursor:pointer}
+.hero{--dir:1}
+.enemy{--dir:-1}
+.overhead{min-height:calc(var(--sprite) * .34);display:flex;align-items:flex-end;justify-content:center}
+.sprite-wrap{position:relative;width:var(--sprite);height:var(--sprite);display:grid;place-items:center}
+.shadow{position:absolute;bottom:3%;left:16%;right:16%;height:12%;border-radius:50%;background:rgba(0,0,0,.35)}
+.sprite{position:relative;font-size:calc(var(--sprite) * .8);line-height:1;animation:idle 2.6s ease-in-out infinite;
+  filter:drop-shadow(0 2px 0 rgba(0,0,0,.35))}
+/* pixel sheet: frames are stepped from JS (tickSprites); every sheet's feet sit on the same baseline */
+.sprite.px{align-self:end;width:calc(var(--sprite) * var(--k, 1));height:calc(var(--sprite) * var(--k, 1));font-size:0;animation:none;
+  background-repeat:no-repeat;image-rendering:pixelated;image-rendering:crisp-edges}
+.uname{font-family:var(--font-display);font-size:clamp(10px, calc(var(--sprite) * .15), 15px);color:var(--sand);
+  text-shadow:0 1px 2px #000;white-space:nowrap}
+
+.bar{width:100%;position:relative;display:flex;align-items:center}
+.hp{flex:1;position:relative;height:clamp(12px, calc(var(--sprite) * .15), 19px);background:#2a1513;border:2px solid #0d0807;border-radius:4px;overflow:hidden}
+.hp i{position:absolute;inset:0 auto 0 0;background:linear-gradient(#f0675a,#c3342a);transition:width .35s}
+.has-block .hp{border-color:#235f87}
+.hp span,.blk b{font-family:var(--font-pixel);font-weight:700;color:#fff;line-height:1;
+  text-shadow:0 1px 0 #000,1px 0 0 #000,-1px 0 0 #000,0 -1px 0 #000}
+.hp span{position:absolute;inset:0;display:grid;place-items:center;font-size:clamp(9px, calc(var(--sprite) * .13), 15px)}
+.blk{position:absolute;left:-.7em;top:50%;transform:translateY(-50%);z-index:1;width:2em;height:2.2em;display:grid;place-items:center;
+  font-size:clamp(9px, calc(var(--sprite) * .13), 15px);background:linear-gradient(#b9e4f7,#3c86b8);
+  clip-path:polygon(50% 0,100% 14%,100% 56%,50% 100%,0 56%,0 14%)}
+.sts{display:flex;flex-wrap:wrap;justify-content:center;gap:3px;min-height:1.1em}
+.st{font-family:var(--font-display);font-size:clamp(9px, calc(var(--sprite) * .13), 13px);line-height:1.5;padding:0 .5em;border-radius:1em;white-space:nowrap}
+.st-weak{background:#5a3311;color:#ffc78a;border:1px solid #9a5a1e}
+.st-str{background:#5a1612;color:#ffb0a5;border:1px solid #9a2c22}
+
+.intent,.incoming{display:flex;align-items:center;gap:.15em;padding:.12em .5em;border-radius:1em;white-space:nowrap;
+  font-size:clamp(11px, calc(var(--sprite) * .19), 22px);background:rgba(13,18,22,.82);border:1px solid rgba(255,255,255,.16);
+  animation:bob 1.8s ease-in-out infinite}
+.intent b,.incoming b{font-family:var(--font-pixel);font-weight:700;color:#fff}
+.intent.atk b{color:#ffb9ae}
+.i-tgt{font-size:.8em;margin-left:.2em;padding-left:.3em;border-left:1px solid rgba(255,255,255,.25);display:flex;gap:.15em}
+.face{display:block;width:1.35em;height:1.35em;border-radius:.3em;background-color:#2b3940;background-repeat:no-repeat;image-rendering:pixelated}
+.intent.warn{border-color:var(--hibiscus);box-shadow:0 0 .7em rgba(226,73,58,.75)}
+.intent .bang{color:#ff7b6b}
+.incoming{background:rgba(92,22,16,.86);border-color:rgba(255,140,120,.45);font-size:clamp(10px, calc(var(--sprite) * .16), 18px)}
+
+/* unit reactions — CSS motion on the wrap, on top of the sheet frames anim() plays */
+.sprite-wrap.a-attack{animation:lunge .32s ease-out}
+.sprite-wrap.a-skill{animation:hop .34s ease-out}
+.sprite-wrap.a-buff{animation:puff .4s ease-out}
+.sprite-wrap.a-hit{animation:shake .36s linear,flash .36s ease-out}
+.hero.down .sprite{animation:none;transform:rotate(-90deg) translateX(-18%)}
+.hero.down .sprite-wrap{filter:grayscale(1) brightness(.6)}
+.enemy.dead{animation:die .7s ease-in forwards;pointer-events:none}
+.field.aiming .enemy:not(.dead){cursor:crosshair}
+.field.aiming .enemy:not(.dead) .sprite-wrap::before{content:"";position:absolute;inset:-5%;border-radius:50%;
+  border:2px dashed rgba(246,196,83,.9);animation:spin 7s linear infinite}
+.field.aiming .enemy.aimed .sprite-wrap::before{border:3px solid #ff6b57;box-shadow:0 0 14px rgba(255,107,87,.75)}
+.field.quake{animation:quake .3s linear}
+
+.fx{position:absolute;inset:0;z-index:20;pointer-events:none}
+.float{position:absolute;transform:translate(-50%,-50%);font-family:var(--font-pixel);font-weight:700;white-space:nowrap;
+  font-size:clamp(18px, 5.5cqh, 38px);color:#fff;text-shadow:0 2px 0 #000,2px 0 0 #000,-2px 0 0 #000,0 -2px 0 #000;
+  animation:floatUp .95s ease-out forwards}
+.mist{position:absolute;aspect-ratio:2;background:url('sprites/mist.png') center / contain no-repeat;image-rendering:pixelated;
+  transform:translate(-50%,-50%);animation:mist .42s ease-out forwards}
+.float.hurt{color:#ff8170}
+.float.block{color:var(--surf);font-size:clamp(13px, 3.6cqh, 24px)}
+.float.heal{color:#8ef08a}
+.float.debuff,.float.buff{font-family:var(--font-display);font-weight:400;font-size:clamp(14px, 4cqh, 26px)}
+.float.debuff{color:var(--weak)}
+.float.buff{color:#ffd166}
+
+.hint{position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:12;max-width:calc(100% - 32px);
+  font-family:var(--font-display);font-size:clamp(13px, 3.4cqw, 18px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  background:rgba(12,18,22,.84);color:var(--sand);padding:.3em .95em;border-radius:2em;border:1px solid rgba(255,255,255,.16);transition:opacity .2s}
+.hint:empty{opacity:0;padding:0;border:0}
+.hint.warn{color:#ffb9ae;border-color:rgba(226,73,58,.6)}
+@media (min-width:800px){.hint{top:14px}}
+
+.banner{position:absolute;left:0;right:0;top:36%;z-index:30;text-align:center;pointer-events:none;opacity:0;
+  font-family:var(--font-display);font-size:clamp(26px, 7.5cqw, 54px);color:#fff;text-shadow:0 3px 0 #000;padding:.2em 0;
+  background:linear-gradient(90deg,transparent,rgba(12,18,22,.88) 20%,rgba(12,18,22,.88) 80%,transparent)}
+.banner.show{animation:banner .95s ease forwards}
+.banner.enemy{color:#ffb9ae}
+
+.tip{position:absolute;z-index:25;width:max-content;max-width:min(250px,72cqw);pointer-events:none;
+  background:rgba(14,20,24,.96);border:1px solid var(--line);border-radius:10px;padding:8px 11px;
+  font-size:13px;line-height:1.5;color:var(--sand);box-shadow:0 8px 20px rgba(0,0,0,.5)}
+.tip b{font-family:var(--font-display);font-weight:400;color:var(--plumeria)}
+.tip .note{color:var(--sand-dim)}
+
+/* ---------- dock ---------- */
+.dock{position:relative;z-index:5;display:grid;grid-template-columns:auto auto minmax(0,1fr) auto auto;
+  grid-template-areas:"draw energy . end discard" "hand hand hand hand hand";align-items:center;gap:6px 12px;
+  padding:8px 16px 8px;background:linear-gradient(#18222a,#0e1418);border-top:2px solid #090d10}
+.hand{grid-area:hand;position:relative;height:calc(var(--card-h) + 8px)}
+#drawPile{grid-area:draw}
+#discardPile{grid-area:discard}
+.energy{grid-area:energy}
+.end-turn{grid-area:end}
+@media (min-aspect-ratio:5/4){
+  .dock{grid-template-columns:minmax(96px,13%) minmax(0,1fr) minmax(112px,14%);grid-template-areas:"energy hand end" "draw hand discard";
+    padding:8px 16px 10px;gap:10px 14px}
+  .energy,#drawPile,.end-turn,#discardPile{justify-self:center}
+}
+
+.energy{width:clamp(48px, calc(var(--card-w) * .6), 88px);aspect-ratio:1;border-radius:50%;display:grid;place-items:center;
+  background:radial-gradient(circle at 35% 30%,#c3f7ad,#4fb245 45%,#1d5c1b 80%);
+  box-shadow:0 0 0 3px #0d2a11,0 0 0 5px #3f6b3a,0 0 18px rgba(120,230,110,.45);
+  font-family:var(--font-pixel);font-weight:700;color:#fff;text-shadow:0 2px 0 #0b280e;transition:filter .2s}
+.energy span{font-size:clamp(16px, calc(var(--card-w) * .2), 30px);line-height:1}
+.energy small{font-size:.6em;opacity:.85}
+.energy.empty{filter:saturate(.15) brightness(.55)}
+.energy.flash{animation:puff .35s ease-out}
+
+.end-turn{font-family:var(--font-display);font-size:clamp(15px, calc(var(--card-w) * .14), 22px);padding:.45em 1.05em;white-space:nowrap;
+  border:2px solid #6c8992;border-radius:.55em;background:linear-gradient(#3b4d56,#24323a);color:var(--sand);
+  box-shadow:0 3px 0 #090d10,inset 0 1px 0 rgba(255,255,255,.15)}
+.end-turn:active:not(:disabled){transform:translateY(2px);box-shadow:0 1px 0 #090d10}
+.end-turn:disabled{opacity:.55;cursor:default}
+.end-turn.nudge{border-color:var(--plumeria);animation:nudge 1.5s ease-in-out infinite}
+
+.pile{position:relative;width:clamp(38px, calc(var(--card-w) * .42), 62px);aspect-ratio:.72;border-radius:6px;padding:0;
+  border:2px solid #090d10;box-shadow:3px 3px 0 rgba(0,0,0,.4),6px 6px 0 rgba(0,0,0,.22)}
+#drawPile{background:repeating-linear-gradient(45deg,#7b5938 0 4px,#8c6844 4px 8px)}
+#discardPile{background:repeating-linear-gradient(45deg,#3d4a6a 0 4px,#4a5a7c 4px 8px)}
+.pile small{position:absolute;inset:0;display:grid;place-items:center;font-family:var(--font-display);font-size:11px;color:var(--sand);text-shadow:0 1px 2px #000}
+.pile b{position:absolute;right:-9px;bottom:-9px;min-width:23px;height:23px;padding:0 4px;border-radius:12px;display:grid;place-items:center;
+  font-family:var(--font-pixel);font-size:12px;color:#fff;background:#a3442f;border:2px solid #120c0a}
+.pile.pulse{animation:puff .45s ease-out}
+
+/* ---------- cards ---------- */
+.card{position:absolute;left:0;bottom:0;width:var(--card-w);height:var(--card-h);font-size:calc(var(--card-w) / 8.4);
+  transform-origin:50% 100%;transition:transform .3s cubic-bezier(.2,.8,.2,1),opacity .25s;touch-action:none;cursor:pointer;
+  --frame:#46aaa3;--frame-d:#256f6a}
+.card.a-alpaca{--frame:#6eab52;--frame-d:#3b6b2b}
+.card.a-both{--frame:#d6a74c;--frame-d:#8c6622}
+.card.dragging{transition:none;z-index:200!important}
+.card.leaving{pointer-events:none;transition:transform .36s ease-in,opacity .36s ease-in}
+.card-face{position:absolute;inset:0;border-radius:.75em;padding:.4em .38em .42em;display:flex;flex-direction:column;gap:.28em;
+  background:linear-gradient(160deg,var(--frame),var(--frame-d));
+  box-shadow:0 .35em .7em rgba(0,0,0,.5),inset 0 0 0 .12em rgba(255,255,255,.22),inset 0 -.25em 0 rgba(0,0,0,.18);
+  transition:box-shadow .2s,filter .2s}
+.cost{position:absolute;left:-.45em;top:-.45em;z-index:2;width:2.05em;height:2.05em;border-radius:50%;display:grid;place-items:center;
+  font-family:var(--font-pixel);font-weight:700;font-size:1.05em;color:#fff;text-shadow:0 .08em 0 #0b2a0f;
+  background:radial-gradient(circle at 35% 30%,#b0f7a2,#3f9e3c 55%,#1f611c);box-shadow:0 0 0 .14em #10351a,0 .15em .3em rgba(0,0,0,.5)}
+.cname{margin-left:1.2em;padding:0 .3em;border-radius:.4em;background:#ece6cf;color:#2b2a22;text-align:center;white-space:nowrap;overflow:hidden;
+  font-family:var(--font-display);font-size:.92em;line-height:1.55;letter-spacing:-.02em;box-shadow:inset 0 -.12em 0 rgba(0,0,0,.15)}
+.cname.long{font-size:.76em;line-height:1.85}
+.art{flex:1;min-height:0;position:relative;border-radius:.45em;display:grid;place-items:center;overflow:hidden;box-shadow:inset 0 0 0 .1em rgba(0,0,0,.35)}
+.t-attack .art{background:radial-gradient(circle at 50% 42%,#ffd27a,#e2643a 55%,#7a2a20)}
+.t-skill .art{background:radial-gradient(circle at 50% 42%,#d2f4ff,#4fa7c9 55%,#22506b)}
+.a-both .art{background:radial-gradient(circle at 50% 70%,#fff6c7,#9bd8e8 45%,#3b7fae)}
+.art-ico{font-size:2.5em;line-height:1;filter:drop-shadow(0 .08em 0 rgba(0,0,0,.35))}
+.art-pic{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;image-rendering:pixelated;pointer-events:none}
+.art::after{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:inset 0 0 0 .1em rgba(0,0,0,.35);pointer-events:none}
+.ctag{position:absolute;bottom:.25em;left:50%;transform:translateX(-50%);white-space:nowrap;font-size:.55em;line-height:1.5;
+  background:rgba(10,14,16,.72);color:var(--sand);padding:0 .6em;border-radius:1em}
+.desc{min-height:4.2em;display:grid;place-items:center;padding:.4em .32em;border-radius:.45em;background:#1d2928;color:var(--sand);
+  font-size:.74em;line-height:1.32;text-align:center;word-break:keep-all}
+.desc.dense{font-size:.64em}
+.desc b{font-family:var(--font-pixel);font-weight:700;color:#fff}
+.desc b.up{color:var(--ok)}
+.desc b.down{color:#ff8a7a}
+.desc .kw{color:var(--weak)}
+.desc .ex{color:#cdbb86}
+.desc em{font-style:normal;color:var(--plumeria)}
+.card.ok .card-face{box-shadow:0 0 0 .14em var(--ok),0 0 .9em rgba(147,240,139,.5),0 .35em .7em rgba(0,0,0,.5)}
+.card.no .card-face{filter:saturate(.5) brightness(.75)}
+.card.no .cost{background:radial-gradient(circle at 35% 30%,#ded7c4,#8a8478 55%,#4f4a42)}
+.card.sel .card-face{box-shadow:0 0 0 .16em var(--plumeria),0 0 1.1em rgba(246,196,83,.7),0 .5em 1em rgba(0,0,0,.6)}
+.card.ko::after{content:"기절";position:absolute;left:-4%;right:-4%;top:40%;z-index:3;transform:rotate(-12deg);text-align:center;
+  font-family:var(--font-display);font-size:1.3em;color:#fff;background:rgba(120,30,25,.88);padding:.1em 0}
+
+/* ---------- modal ---------- */
+.modal{position:fixed;inset:0;z-index:100;display:grid;place-items:center;padding:16px;background:rgba(5,8,10,.72)}
+.sheet{width:min(440px,100%);max-height:86%;overflow:auto;touch-action:pan-y;overscroll-behavior:contain;
+  background:var(--slate);border:2px solid var(--line);border-radius:14px;padding:18px;box-shadow:0 20px 50px rgba(0,0,0,.6)}
+.sheet h2{margin:0 0 6px;font-family:var(--font-display);font-weight:400;font-size:24px;color:var(--plumeria);text-wrap:balance}
+.sheet h2.lose{color:#ff9d8f}
+.sheet p{margin:0 0 10px;line-height:1.55;color:var(--sand)}
+.sheet .sub{color:var(--sand-dim);font-size:13px}
+.sheet .stats{font-family:var(--font-pixel);color:var(--sand);font-variant-numeric:tabular-nums}
+.sheet ul{list-style:none;margin:8px 0 12px;padding:0;display:grid;gap:8px}
+.help li{line-height:1.5;padding-left:1em;text-indent:-1em}
+.help li::before{content:"· ";color:var(--plumeria)}
+.pile-list li{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:2px 10px;padding:8px 10px;border-radius:10px;
+  background:#172126;border-left:4px solid #46aaa3}
+.pile-list li.a-alpaca{border-left-color:#6eab52}
+.pile-list li.a-both{border-left-color:#d6a74c}
+.pile-list .m-cost{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-family:var(--font-pixel);font-weight:700;color:#fff;
+  background:radial-gradient(circle at 35% 30%,#b0f7a2,#3f9e3c 55%,#1f611c)}
+.pile-list .m-name{font-family:var(--font-display);font-size:16px}
+.pile-list .m-n{font-family:var(--font-pixel);color:var(--sand-dim)}
+.pile-list .m-desc{grid-column:2 / 4;font-size:13px;color:var(--sand-dim);line-height:1.45}
+.pile-list .m-desc b{color:var(--sand)}
+.pile-list .m-desc .kw{color:var(--weak)}
+.pile-list .m-desc em{font-style:normal;color:var(--plumeria)}
+.row{display:flex;gap:10px;justify-content:flex-end;margin-top:6px}
+.btn{font-family:var(--font-display);font-size:17px;padding:.5em 1.2em;border-radius:10px;border:2px solid #0b1013;background:var(--plumeria);color:#2a2112;box-shadow:0 3px 0 #090d10}
+.btn.ghost{background:#2b3940;color:var(--sand);border-color:var(--line)}
+.btn:active{transform:translateY(2px);box-shadow:0 1px 0 #090d10}
+.ver{margin-top:12px!important;font-family:var(--font-pixel);font-size:11px;color:var(--sand-dim)!important}
+
+@keyframes idle{0%,100%{transform:translateY(0)}50%{transform:translateY(-4%)}}
+@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+@keyframes lunge{0%{transform:none}35%{transform:translateX(calc(var(--dir) * 30%))}100%{transform:none}}
+@keyframes hop{0%,100%{transform:none}40%{transform:translateY(-16%)}}
+@keyframes puff{0%,100%{transform:none}40%{transform:scale(1.15)}}
+@keyframes shake{0%,100%{transform:none}20%{transform:translateX(calc(var(--dir) * -12%))}45%{transform:translateX(calc(var(--dir) * 7%))}70%{transform:translateX(calc(var(--dir) * -4%))}}
+@keyframes flash{0%,35%{filter:brightness(1.6) sepia(1) saturate(6) hue-rotate(-35deg)}100%{filter:none}}
+@keyframes die{0%{opacity:1}100%{opacity:0;transform:translateY(12%) scale(.85);filter:grayscale(1)}}
+@keyframes mist{0%{opacity:0;transform:translate(-50%,-50%) scale(.3)}20%{opacity:1}
+  60%{opacity:1;transform:translate(calc(var(--dx) - 50%),calc(var(--dy) - 50%)) scale(1)}
+  100%{opacity:0;transform:translate(calc(var(--dx) - 50%),calc(var(--dy) - 50%)) scale(1.5)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes quake{0%,100%{transform:none}25%{transform:translate(3px,-2px)}50%{transform:translate(-3px,2px)}75%{transform:translate(2px,1px)}}
+@keyframes floatUp{0%{opacity:0;transform:translate(-50%,-30%) scale(.6)}15%{opacity:1;transform:translate(-50%,-70%) scale(1.15)}100%{opacity:0;transform:translate(-50%,-190%) scale(1)}}
+@keyframes banner{0%{opacity:0;transform:scaleY(0)}15%,80%{opacity:1;transform:scaleY(1)}100%{opacity:0}}
+@keyframes nudge{0%,100%{box-shadow:0 3px 0 #090d10,0 0 0 0 rgba(246,196,83,0)}50%{box-shadow:0 3px 0 #090d10,0 0 0 6px rgba(246,196,83,.35)}}
+@media (prefers-reduced-motion:reduce){
+  .sprite,.intent,.incoming,.end-turn.nudge,.field.aiming .enemy .sprite-wrap::before{animation:none}
+}
+</style>
+
+</head>
+<body>
+<div class="game" id="game">
+  <header class="topbar">
+    <div class="who"><b>Donglechu</b><span>퇴치 대원</span></div>
+    <div class="where">마노아 폭포 · 1층</div>
+    <div class="turn">턴 <b id="turnNo">1</b></div>
+    <button class="icon-btn" id="menuBtn" type="button" aria-label="메뉴"><i></i></button>
+  </header>
+
+  <main class="field" id="field">
+    <canvas id="bg" aria-hidden="true"></canvas>
+    <div class="version">[v0.2] (2026-10-05)<br>HAWAII-MANOA</div>
+    <div class="lineup">
+      <div class="side heroes" id="heroes"></div>
+      <div class="side enemies" id="enemies"></div>
+    </div>
+    <div class="fx" id="fx"></div>
+    <div class="hint" id="hint" aria-live="polite"></div>
+    <div class="banner" id="banner"></div>
+    <div class="tip" id="tip" hidden></div>
+  </main>
+
+  <section class="dock" id="dock">
+    <button class="pile" id="drawPile" type="button" aria-label="뽑을 카드 보기"><small>덱</small><b id="drawCount">0</b></button>
+    <div class="energy" id="energy" aria-label="에너지"><span><b id="energyNow">3</b><small>/<i id="energyMax">3</i></small></span></div>
+    <div class="hand" id="hand"></div>
+    <button class="end-turn" id="endTurn" type="button">턴 종료</button>
+    <button class="pile" id="discardPile" type="button" aria-label="버린 카드 보기"><small>버림</small><b id="discardCount">0</b></button>
+  </section>
+</div>
+
+<div class="modal" id="modal" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" id="modalBody"></div>
+</div>
+
+<script>
+(() => {
+'use strict';
+
+/* =====================================================================
+   DATA — 숫자 바꾸고 싶으면 여기만 고치면 됩니다.
+   ===================================================================== */
+const HEROES = {
+  girl:   { name: '선크림 소녀', emoji: '👧', hp: 80 },
+  alpaca: { name: '알파카',      emoji: '🦙', hp: 60 },
+};
+const ACTOR_LABEL = { girl: '소녀', alpaca: '알파카', both: '함께' };
+const TYPE_LABEL = { attack: '공격', skill: '스킬' };
+
+// fx: dmg(단일) · dmgAll · block(to: 'girl'이면 소녀에게) · weak(to: target|random|all, times) · draw · heal(아군 모두)
+// spray: true면 쓸 때 시전자에게서 대상에게 분사 구름이 날아간다
+const CARDS = {
+  spray:        { name: '스프레이 칙칙',   cost: 1, type: 'attack', actor: 'girl',   target: 'enemy', art: '💨', fx: [{ k: 'dmg', n: 6 }], spray: true },
+  parasol:      { name: '양산 펼치기',     cost: 1, type: 'skill',  actor: 'girl',   target: 'none',  art: '⛱️', fx: [{ k: 'block', n: 5 }] },
+  sunscreen:    { name: '선크림 바르기',   cost: 1, type: 'skill',  actor: 'girl',   target: 'none',  art: '🧴', fx: [{ k: 'block', n: 8 }, { k: 'draw', n: 1 }] },
+  raid:         { name: '레이드 분사',     cost: 1, type: 'attack', actor: 'girl',   target: 'enemy', art: '🧯', fx: [{ k: 'dmg', n: 9 }, { k: 'weak', n: 1, to: 'target' }], spray: true },
+  slipper:      { name: '슬리퍼 투척',     cost: 0, type: 'attack', actor: 'girl',   target: 'enemy', art: '🩴', fx: [{ k: 'dmg', n: 4, x2: 'roach' }] },
+  spit:         { name: '침 뱉기',         cost: 1, type: 'attack', actor: 'alpaca', target: 'enemy', art: '💦', fx: [{ k: 'dmg', n: 6 }], spray: true },
+  fluff:        { name: '털 부풀리기',     cost: 1, type: 'skill',  actor: 'alpaca', target: 'none',  art: '☁️', fx: [{ k: 'block', n: 6 }] },
+  alpacaAttack: { name: '알파카 어택',     cost: 1, type: 'attack', actor: 'alpaca', target: 'enemy', art: '🦙', fx: [{ k: 'dmg', n: 11 }, { k: 'block', n: 5 }], spray: true },
+  hug:          { name: '복슬복슬 감싸기', cost: 1, type: 'skill',  actor: 'alpaca', target: 'none',  art: '🫂', fx: [{ k: 'block', n: 8, to: 'girl' }] },
+  tea:          { name: '하와이안 허브티', cost: 1, type: 'skill',  actor: 'both',   target: 'none',  art: '🍵', fx: [{ k: 'heal', n: 5 }, { k: 'draw', n: 1 }], exhaust: true },
+  rainbow:      { name: '무지개',          cost: 2, type: 'attack', actor: 'both',   target: 'none',  art: '🌈', fx: [{ k: 'dmgAll', n: 7 }, { k: 'weak', n: 1, to: 'random', times: 3 }] },
+};
+const STARTER = ['spray', 'spray', 'parasol', 'parasol', 'sunscreen', 'raid', 'slipper',
+                 'spit', 'spit', 'fluff', 'fluff', 'alpacaAttack', 'hug', 'tea', 'rainbow'];
+
+const ENEMIES = {
+  centipede: {
+    name: '지네', emoji: '🐛', hp: 32,
+    moves: {
+      bite:  { name: '깨물기',    dmg: 6 },
+      venom: { name: '독니',      dmg: 4, weak: 1, note: '물리면 힘이 빠진다.' },
+      curl:  { name: '똬리 틀기', block: 6, str: 2, note: '몸을 말고 힘을 모은다.' },
+    },
+    ai(h) {
+      if (!h.length) return 'bite';
+      const [last, prev] = [h[h.length - 1], h[h.length - 2]];
+      return weighted([['bite', 40], ['venom', 35], ['curl', 25]]
+        .filter(([id]) => !(id === last && id === prev) && !(id === 'curl' && last === 'curl')));
+    },
+  },
+  roach: {
+    name: '바퀴벌레', emoji: '🪳', hp: 38,
+    moves: {
+      charge: { name: '돌진',        dmg: 8 },
+      whip:   { name: '더듬이 채찍', dmg: 4, hits: 2 },
+      wings:  { name: '날개 펴기',   str: 2, block: 5, warn: true, note: '다음 턴에 날아서 덮친다!!' },
+      fly:    { name: '공중 습격',   dmg: 6, all: true, note: '날아다니는 바퀴벌레… 최악이다.' },
+    },
+    ai(h) {
+      const last = h[h.length - 1], prev = h[h.length - 2];
+      if (last === 'wings') return 'fly';
+      if (!h.length) return 'charge';
+      return weighted([['charge', 40], ['whip', 35], ['wings', 25]]
+        .filter(([id]) => !(id === last && id === prev) && !(id === 'wings' && h.slice(-3).includes('fly'))));
+    },
+  },
+};
+const LINEUP = ['centipede', 'roach'];
+
+// 픽셀 스프라이트 (PixelLab 64px). 시트 한 줄 = idle / attack / hit, 숫자는 그 줄에서 재생할 칸 순서.
+// k: 소녀 대비 크기. face: 적 행동 예고에 쓰는 얼굴 [x, y, 크기] (시트 픽셀). 키는 HEROES·ENEMIES 이름과 같다. 없으면 이모지로 그린다.
+const SPRITES = {
+  girl:      { sheet: 'sprites/girl.png',      k: 1,    face: [20, 5, 26], idle: [0, 1, 2, 3, 2, 1], attack: [0, 1, 2, 3, 4, 5], hit: [0, 1, 2, 3, 4] },
+  alpaca:    { sheet: 'sprites/alpaca.png',    k: 0.82, face: [21, 3, 28], idle: [0, 0, 1, 2, 3, 4, 4, 4, 3, 2, 1], attack: [0, 1, 2, 3, 4, 4, 2, 1], hit: [0, 1, 2, 3, 4] },
+  centipede: { sheet: 'sprites/centipede.png', k: 1,    idle: [0, 1, 2, 3, 4], attack: [0, 1, 2, 3, 4, 5, 6], hit: [0, 1, 2, 3, 4] },
+  roach:     { sheet: 'sprites/roach.png',     k: 0.92, idle: [0, 1, 2, 3, 4], attack: [0, 1, 2, 3, 4, 5, 6, 1], hit: [0, 1, 2, 3, 4] },
+};
+const SPRITE_FPS = { idle: 5, attack: 14, hit: 14 };
+const HAND_SIZE = 5, MAX_HAND = 10, MAX_ENERGY = 3;
+
+/* =====================================================================
+   HELPERS
+   ===================================================================== */
+const $ = id => document.getElementById(id);
+const wait = ms => new Promise(r => setTimeout(r, ms));
+const pick = a => a[Math.floor(Math.random() * a.length)];
+function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+function weighted(opts) {
+  let r = Math.random() * opts.reduce((s, [, w]) => s + w, 0);
+  for (const [id, w] of opts) if ((r -= w) < 0) return id;
+  return opts[opts.length - 1][0];
+}
+const eul = n => '을을를을를를을을을를'[n % 10];   // 1을, 2를, 3을 …
+
+/* =====================================================================
+   STATE — plain JSON so a page update can hand it back (hot snapshot)
+   ===================================================================== */
+let S = null;
+let busy = false;
+let selected = null;   // card uid
+let hoverUid = null;
+let drag = null;
+let tipTimer = 0;
+const handEls = new Map();
+const spriteEls = [];
+const els = {};
+
+function newState() {
+  let seq = 0;
+  return {
+    v: 1, turn: 1, phase: 'player', energy: MAX_ENERGY, maxEnergy: MAX_ENERGY, playedAny: false,
+    heroes: Object.keys(HEROES).map(id => ({ uid: id, id, hp: HEROES[id].hp, maxHp: HEROES[id].hp, block: 0, weak: 0, str: 0 })),
+    enemies: LINEUP.map((kind, i) => ({ uid: 'e' + i, kind, hp: ENEMIES[kind].hp, maxHp: ENEMIES[kind].hp, block: 0, weak: 0, str: 0, intent: null, history: [] })),
+    draw: shuffle(STARTER.map(id => ({ uid: 'c' + (seq++), id }))),
+    hand: [], discard: [], exhaust: [],
+    stats: { dealt: 0, taken: 0 },
+  };
+}
+
+const hero = id => S.heroes.find(h => h.id === id);
+const aliveHeroes = () => S.heroes.filter(h => h.hp > 0);
+const aliveEnemies = () => S.enemies.filter(e => e.hp > 0);
+const isEnemy = f => !!f.kind;
+const unitEl = f => $('u-' + f.uid);
+const moveOf = en => ENEMIES[en.kind].moves[en.intent.move];
+const actorOf = d => (d.actor === 'both' ? null : hero(d.actor));
+const actorAlive = d => (d.actor === 'both' ? aliveHeroes().length > 0 : actorOf(d).hp > 0);
+
+function attackValue(src, base) {
+  let n = base + (src ? src.str : 0);
+  if (src && src.weak > 0) n = Math.floor(n * 0.75);
+  return Math.max(0, n);
+}
+function blockReason(c) {
+  const d = CARDS[c.id];
+  if (S.phase !== 'player') return '벌레들의 차례예요';
+  if (!actorAlive(d)) return `${HEROES[d.actor].name}가 기절해서 쓸 수 없어요`;
+  if (d.cost > S.energy) return '에너지가 부족해요';
+  return '';
+}
+const playable = c => !blockReason(c);
+
+function targetIdOf(en) {
+  const t = en.intent && en.intent.target;
+  if (t && t !== 'all' && hero(t).hp > 0) return t;
+  const alive = aliveHeroes();
+  return alive.length ? alive[0].id : null;
+}
+function rollIntent(en) {
+  const move = ENEMIES[en.kind].ai(en.history);
+  const m = ENEMIES[en.kind].moves[move];
+  const alive = aliveHeroes();
+  en.intent = { move, target: m.all ? 'all' : (m.dmg && alive.length ? pick(alive).id : null) };
+}
+function incomingFor(h) {
+  let total = 0;
+  for (const en of aliveEnemies()) {
+    const m = moveOf(en);
+    if (!m.dmg) continue;
+    if (m.all || targetIdOf(en) === h.id) total += attackValue(en, m.dmg) * (m.hits || 1);
+  }
+  return total;
+}
+
+/* =====================================================================
+   TEXT
+   ===================================================================== */
+function num(n, base) { return `<b class="${n > base ? 'up' : n < base ? 'down' : ''}">${n}</b>`; }
+function cardText(d, actor) {
+  const out = [];
+  for (const e of d.fx) {
+    switch (e.k) {
+      case 'dmg': out.push(`피해를 ${num(attackValue(actor, e.n), e.n)} 줍니다.` + (e.x2 ? ` <em>${ENEMIES[e.x2].name}</em>에게는 2배!` : '')); break;
+      case 'dmgAll': out.push(`모든 적에게 피해를 ${num(attackValue(actor, e.n), e.n)} 줍니다.`); break;
+      case 'block': out.push(e.to === 'girl' ? `소녀에게 방어도를 <b>${e.n}</b> 줍니다.` : `방어도를 <b>${e.n}</b> 얻습니다.`); break;
+      case 'weak': out.push(e.to === 'random'
+        ? `무작위 적에게 <span class="kw">약화</span> ${e.n}${eul(e.n)} ${e.times}번 부여합니다.`
+        : `<span class="kw">약화</span> ${e.n}${eul(e.n)} 부여합니다.`); break;
+      case 'draw': out.push(`카드를 <b>${e.n}</b>장 뽑습니다.`); break;
+      case 'heal': out.push(`아군 모두 체력을 <b>${e.n}</b> 회복합니다.`); break;
+    }
+  }
+  if (d.exhaust) out.push('<span class="ex">소멸</span>');
+  return out.join(' ');
+}
+// a hero's head cropped from frame 0 of their sheet, so the intent shows who gets hit
+function faceHTML(id) {
+  const sp = SPRITES[id];
+  if (!sp?.face) return HEROES[id].emoji;
+  const [x, y, s] = sp.face, w = sheetCols(sp) * 64, h = SPRITE_ROWS.length * 64;
+  return `<i class="face" style="background-image:url('${sp.sheet}');background-size:${w / s * 100}% ${h / s * 100}%;`
+    + `background-position:${x / (w - s) * 100}% ${y / (h - s) * 100}%"></i>`;
+}
+function intentHTML(en) {
+  const m = moveOf(en);
+  let h = '';
+  if (m.dmg) {
+    h += `<span>🗡️</span><b>${attackValue(en, m.dmg)}${m.hits > 1 ? '×' + m.hits : ''}</b>`;
+    if (m.weak) h += '<span>🌀</span>';
+    const tid = targetIdOf(en);
+    const who = m.all ? aliveHeroes().map(x => faceHTML(x.id)).join('') : tid ? faceHTML(tid) : '';
+    h += `<span class="i-tgt">${who}</span>`;
+  } else {
+    if (m.block) h += '<span>🛡️</span>';
+    if (m.str) h += '<span>💪</span>';
+    if (m.warn) h += '<b class="bang">!!</b>';
+  }
+  const cls = 'intent' + (m.dmg ? ' atk' : '') + (m.warn ? ' warn' : '');
+  return `<div class="${cls}">${h}</div>`;
+}
+function intentText(en) {
+  const m = moveOf(en), bits = [];
+  if (m.dmg) {
+    const who = m.all ? '아군 모두' : HEROES[targetIdOf(en)].name;
+    bits.push(`${who}에게 피해 ${attackValue(en, m.dmg)}${m.hits > 1 ? ` × ${m.hits}번` : ''}`);
+    if (m.weak) bits.push(`약화 ${m.weak}`);
+  }
+  if (m.block) bits.push(`방어도 ${m.block}`);
+  if (m.str) bits.push(`힘 +${m.str}`);
+  return `다음 행동 · <b>${m.name}</b><br>${bits.join(', ')}` + (m.note ? `<br><span class="note">${m.note}</span>` : '');
+}
+function statusLines(f) {
+  const out = [];
+  if (f.block > 0) out.push(`방어도 ${f.block} · 피해를 먼저 막아요`);
+  if (f.weak > 0) out.push(`약화 ${f.weak} · 주는 피해 25% 감소`);
+  if (f.str > 0) out.push(`힘 ${f.str} · 공격 피해 +${f.str}`);
+  return out;
+}
+
+/* =====================================================================
+   RENDER
+   ===================================================================== */
+function buildUnits() {
+  els.heroes.innerHTML = '';
+  els.enemies.innerHTML = '';
+  spriteEls.length = 0;
+  for (const f of [...S.heroes, ...S.enemies]) {
+    const key = isEnemy(f) ? f.kind : f.id;
+    const d = isEnemy(f) ? ENEMIES[f.kind] : HEROES[f.id];
+    const sp = SPRITES[key];
+    const el = document.createElement('div');
+    el.className = 'unit ' + (isEnemy(f) ? 'enemy' : 'hero');
+    el.id = 'u-' + f.uid;
+    el.dataset.uid = f.uid;
+    const sprite = sp
+      ? `<div class="sprite px" style="--k:${sp.k};background-image:url('${sp.sheet}')"></div>`
+      : `<div class="sprite" style="animation-delay:${(-Math.random() * 2.6).toFixed(2)}s">${d.emoji}</div>`;
+    el.innerHTML = `<div class="overhead"></div>
+      <div class="sprite-wrap"><div class="shadow"></div>${sprite}</div>
+      <div class="bar"><span class="blk" hidden><b></b></span><div class="hp"><i></i><span></span></div></div>
+      <div class="sts"></div>
+      <div class="uname">${d.name}</div>`;
+    (isEnemy(f) ? els.enemies : els.heroes).appendChild(el);
+    if (sp) initSprite(el.querySelector('.sprite'), sp);
+  }
+}
+function setHTML(el, html) { if (el._html !== html) { el.innerHTML = html; el._html = html; } }
+
+function renderUnits() {
+  for (const f of [...S.heroes, ...S.enemies]) {
+    const el = unitEl(f);
+    const out = f.hp <= 0, enemy = isEnemy(f);
+    el.classList.toggle(enemy ? 'dead' : 'down', out);
+    el.classList.toggle('has-block', f.block > 0);
+    el.querySelector('.hp i').style.width = (100 * f.hp / f.maxHp) + '%';
+    el.querySelector('.hp span').textContent = `${f.hp}/${f.maxHp}`;
+    const blk = el.querySelector('.blk');
+    blk.hidden = f.block <= 0;
+    blk.firstElementChild.textContent = f.block;
+    let sts = '';
+    if (f.weak > 0) sts += `<span class="st st-weak">약화 ${f.weak}</span>`;
+    if (f.str > 0) sts += `<span class="st st-str">힘 ${f.str}</span>`;
+    if (!enemy && out) sts += '<span class="st st-str">기절</span>';
+    setHTML(el.querySelector('.sts'), sts);
+    let over = '';
+    if (!out && S.phase !== 'win' && S.phase !== 'lose') {
+      if (enemy && f.intent) over = intentHTML(f);
+      if (!enemy && S.phase === 'player') { const n = incomingFor(f); if (n > 0) over = `<div class="incoming"><span>🗡️</span><b>${n}</b></div>`; }
+    }
+    setHTML(el.querySelector('.overhead'), over);
+  }
+}
+
+function renderHUD() {
+  els.turnNo.textContent = S.turn;
+  els.energyNow.textContent = S.energy;
+  els.energyMax.textContent = S.maxEnergy;
+  els.energy.classList.toggle('empty', S.energy === 0);
+  els.drawCount.textContent = S.draw.length;
+  els.discardCount.textContent = S.discard.length;
+  const myTurn = S.phase === 'player';
+  els.endTurn.disabled = !myTurn || busy;
+  els.endTurn.textContent = S.phase === 'enemy' ? '벌레들 차례' : '턴 종료';
+  els.endTurn.classList.toggle('nudge', myTurn && !busy && S.hand.length > 0 && !S.hand.some(playable));
+}
+
+function makeCard(c) {
+  const d = CARDS[c.id];
+  const el = document.createElement('div');
+  el.className = `card t-${d.type} a-${d.actor}`;
+  el.dataset.uid = c.uid;
+  el.tabIndex = 0;
+  el.setAttribute('role', 'button');
+  el.setAttribute('aria-label', `${d.name}, 비용 ${d.cost}`);
+  el.innerHTML = `<div class="card-face">
+      <div class="cost">${d.cost}</div>
+      <div class="cname${d.name.length > 6 ? ' long' : ''}">${d.name}</div>
+      <div class="art"><span class="art-ico">${d.art}</span><img class="art-pic" src="sprites/cards/${c.id}.png" alt=""><span class="ctag">${TYPE_LABEL[d.type]} · ${ACTOR_LABEL[d.actor]}</span></div>
+      <div class="desc"></div>
+    </div>`;
+  // the pixel picture covers the emoji; a card without a picture file keeps the emoji
+  el.querySelector('.art-pic').addEventListener('error', e => e.target.remove());
+  return el;
+}
+function pileOffset(btn, el) {
+  const pr = btn.getBoundingClientRect(), hr = els.hand.getBoundingClientRect();
+  return { x: pr.left + pr.width / 2 - hr.left - el.offsetWidth / 2, y: pr.top + pr.height / 2 - hr.bottom + el.offsetHeight / 2 };
+}
+function renderHand(animateNew = true) {
+  for (const c of S.hand) {
+    if (handEls.has(c.uid)) continue;
+    const el = makeCard(c);
+    els.hand.appendChild(el);
+    handEls.set(c.uid, el);
+    if (animateNew) {
+      const p = pileOffset(els.drawPile, el);
+      el.style.transition = 'none';
+      el.style.opacity = '0';
+      el.style.transform = `translate(${p.x}px, ${p.y}px) scale(.3)`;
+      void el.offsetWidth;
+      el.style.transition = '';
+      el.style.opacity = '';
+    }
+  }
+  S.hand.forEach((c, i) => {
+    const el = handEls.get(c.uid), d = CARDS[c.id];
+    const ok = playable(c) && !busy;
+    el.classList.toggle('ok', ok);
+    el.classList.toggle('no', !playable(c));
+    el.classList.toggle('ko', !actorAlive(d));
+    el.classList.toggle('sel', c.uid === selected);
+    el.style.zIndex = i + 1;
+    const desc = el.querySelector('.desc');
+    const text = cardText(d, actorOf(d));
+    setHTML(desc, `<span>${text}</span>`);
+    desc.classList.toggle('dense', text.replace(/<[^>]+>/g, '').length > 34);
+  });
+  layoutHand();
+}
+function layoutHand() {
+  const n = S.hand.length;
+  if (!n) return;
+  const first = handEls.get(S.hand[0].uid);
+  const W = els.hand.clientWidth, cw = first.offsetWidth;
+  const hr = els.hand.getBoundingClientRect();
+  // leave ~15% of a card on each side so the tilted outer cards keep their cost gem on screen
+  const step = n > 1 ? Math.min(cw * 0.92, (W - cw * 1.3) / (n - 1)) : 0;
+  const x0 = (W - (cw + step * (n - 1))) / 2;
+  const tilt = Math.min(5, 20 / n);
+  S.hand.forEach((c, i) => {
+    const el = handEls.get(c.uid);
+    if (!el || el.classList.contains('dragging')) return;
+    const off = i - (n - 1) / 2;
+    let x = x0 + i * step, y = off * off * cw * 0.022, r = off * tilt, s = 1, z = i + 1;
+    const isSel = c.uid === selected, isHover = c.uid === hoverUid;
+    if (isSel || isHover) {
+      s = isSel ? Math.max(1.2, Math.min(1.6, 140 / cw)) : 1.14;
+      y = 0; r = 0; z = 100;
+      const extra = cw * (s - 1) / 2;
+      const minX = -hr.left + 6 + extra, maxX = window.innerWidth - hr.left - cw - 6 - extra;
+      x = Math.max(minX, Math.min(maxX, x));
+    }
+    el.style.zIndex = z;
+    el.style.transform = `translate(${x}px, ${y}px) rotate(${r}deg) scale(${s})`;
+  });
+}
+
+function updateHint(msg, warn = false) {
+  let text = msg || '';
+  if (!msg && S.phase === 'player' && !busy) {
+    const c = S.hand.find(x => x.uid === selected);
+    if (c) {
+      const why = blockReason(c);
+      if (why) { text = why; warn = true; }
+      else text = CARDS[c.id].target === 'enemy' ? '공격할 적을 누르세요 (끌어다 놓아도 돼요)' : '한 번 더 누르면 사용해요';
+    } else if (!S.playedAny) text = '카드를 눌러서 골라 보세요';
+  }
+  els.hint.textContent = text;
+  els.hint.classList.toggle('warn', warn);
+}
+function updateAiming() {
+  const c = S.hand.find(x => x.uid === selected);
+  els.field.classList.toggle('aiming', !!c && CARDS[c.id].target === 'enemy' && playable(c) && !busy);
+}
+function setAim(en) {
+  for (const e of S.enemies) unitEl(e).classList.toggle('aimed', !!en && e.uid === en.uid);
+}
+function render() {
+  renderUnits();
+  renderHUD();
+  renderHand();
+  updateAiming();
+  updateHint();
+}
+
+/* ---------- effects layer ---------- */
+function floatText(f, text, cls) {
+  const sp = unitEl(f).querySelector('.sprite-wrap').getBoundingClientRect();
+  const fr = els.field.getBoundingClientRect();
+  const d = document.createElement('div');
+  d.className = 'float ' + cls;
+  d.textContent = text;
+  d.style.left = (sp.left - fr.left + sp.width / 2 + (Math.random() * 26 - 13)) + 'px';
+  d.style.top = (sp.top - fr.top + sp.height * 0.35) + 'px';
+  d.addEventListener('animationend', () => d.remove());
+  els.fx.appendChild(d);
+}
+// a mist puff flies from the caster's spray can to the target, arriving as the attack lands
+function spray(from, to) {
+  const fr = els.field.getBoundingClientRect();
+  const a = unitEl(from).querySelector('.sprite').getBoundingClientRect();
+  const b = unitEl(to).querySelector('.sprite').getBoundingClientRect();
+  const x0 = a.left - fr.left + a.width * 0.8, y0 = a.top - fr.top + a.height * 0.55;
+  const x1 = b.left - fr.left + b.width * 0.4, y1 = b.top - fr.top + b.height * 0.6;
+  const m = document.createElement('div');
+  m.className = 'mist';
+  m.style.cssText = `left:${x0}px;top:${y0}px;width:${a.width * 0.8}px;--dx:${x1 - x0}px;--dy:${y1 - y0}px`;
+  m.addEventListener('animationend', () => m.remove());
+  els.fx.appendChild(m);
+}
+// attack resolves when the sheet reaches its strike frame, so effects land on the hit
+const ANIM_MS = { attack: 220, skill: 160, buff: 200, hit: 120 };
+function anim(f, name) {
+  const w = unitEl(f)?.querySelector('.sprite-wrap');
+  if (!w) return Promise.resolve();
+  w.classList.remove('a-attack', 'a-skill', 'a-buff', 'a-hit');
+  void w.offsetWidth;
+  w.classList.add('a-' + name);
+  playSprite(w.querySelector('.sprite'), name);
+  return wait(ANIM_MS[name] || 150);
+}
+
+/* ---------- pixel sprites: one rAF loop steps every sheet ---------- */
+const SPRITE_ROWS = ['idle', 'attack', 'hit'];
+const calmMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+const sheetCols = sp => Math.max(...SPRITE_ROWS.flatMap(r => sp[r])) + 1;
+function initSprite(el, sp) {
+  const cols = sheetCols(sp);
+  el.style.backgroundSize = `${cols * 100}% ${SPRITE_ROWS.length * 100}%`;
+  el._sp = sp;
+  el._cols = cols;
+  el._a = 'idle';
+  el._t0 = performance.now() - Math.random() * 2000;   // idles out of step with each other
+  spriteEls.push(el);
+}
+function playSprite(el, name) {
+  if (!el?._sp?.[name]) return;
+  el._a = name;
+  el._t0 = performance.now();
+}
+function tickSprites(now) {
+  for (const el of spriteEls) {
+    let seq = el._sp[el._a], i = Math.floor((now - el._t0) * SPRITE_FPS[el._a] / 1000);
+    if (el._a !== 'idle' && i >= seq.length) { el._a = 'idle'; el._t0 = now; seq = el._sp.idle; i = 0; }
+    if (el._a === 'idle') i = calmMotion?.matches || el.closest('.down') ? 0 : i % seq.length;
+    const x = el._cols > 1 ? seq[i] / (el._cols - 1) * 100 : 0;
+    const y = SPRITE_ROWS.indexOf(el._a) / (SPRITE_ROWS.length - 1) * 100;
+    const pos = `${x}% ${y}%`;
+    if (el._pos !== pos) { el.style.backgroundPosition = pos; el._pos = pos; }
+  }
+  requestAnimationFrame(tickSprites);
+}
+function banner(text, kind = '') {
+  els.banner.textContent = text;
+  els.banner.className = 'banner';
+  void els.banner.offsetWidth;
+  els.banner.className = 'banner show ' + kind;
+  return wait(820);
+}
+function quake() {
+  els.field.classList.remove('quake');
+  void els.field.offsetWidth;
+  els.field.classList.add('quake');
+}
+
+/* =====================================================================
+   COMBAT
+   ===================================================================== */
+function damage(target, n) {
+  const blocked = Math.min(target.block, n);
+  target.block -= blocked;
+  const lost = Math.min(target.hp, n - blocked);
+  target.hp -= lost;
+  if (isEnemy(target)) S.stats.dealt += lost; else S.stats.taken += lost;
+  if (blocked > 0) floatText(target, lost > 0 ? `🛡${blocked}` : '막음!', 'block');
+  if (lost > 0 || blocked === 0) floatText(target, String(lost), isEnemy(target) ? 'dmg' : 'hurt');
+  anim(target, 'hit');
+  if (lost >= 10) quake();
+}
+function gainBlock(f, n) { f.block += n; floatText(f, `+${n}`, 'block'); }
+
+async function applyFx(e, actor, target) {
+  const times = e.times || 1;
+  for (let i = 0; i < times; i++) {
+    switch (e.k) {
+      case 'dmg': {
+        if (!target || target.hp <= 0) break;
+        let n = attackValue(actor, e.n);
+        if (e.x2 && target.kind === e.x2) n *= 2;
+        damage(target, n);
+        break;
+      }
+      case 'dmgAll':
+        for (const en of aliveEnemies()) damage(en, attackValue(actor, e.n));
+        break;
+      case 'block': {
+        const who = e.to === 'girl' ? hero('girl') : actor;
+        if (who && who.hp > 0) gainBlock(who, e.n);
+        break;
+      }
+      case 'weak': {
+        const list = e.to === 'target' ? [target] : e.to === 'random' ? [pick(aliveEnemies())] : aliveEnemies();
+        for (const t of list) if (t && t.hp > 0) { t.weak += e.n; floatText(t, `약화 ${e.n}`, 'debuff'); }
+        break;
+      }
+      case 'heal':
+        for (const h of aliveHeroes()) {
+          const got = Math.min(e.n, h.maxHp - h.hp);
+          h.hp += got;
+          floatText(h, `+${got}`, 'heal');
+        }
+        break;
+      case 'draw':
+        await drawCards(e.n);
+        break;
+    }
+    renderUnits();
+    renderHUD();
+    await wait(times > 1 ? 170 : 110);
+  }
+}
+
+async function playCard(uid, targetUid) {
+  const idx = S.hand.findIndex(c => c.uid === uid);
+  if (idx < 0 || busy) return;
+  const c = S.hand[idx], d = CARDS[c.id];
+  if (!playable(c)) { updateHint(blockReason(c), true); return; }
+  const target = targetUid ? S.enemies.find(e => e.uid === targetUid && e.hp > 0) : null;
+  if (d.target === 'enemy' && !target) return;
+
+  busy = true;
+  selected = null; hoverUid = null;
+  setAim(null); hideTip();
+  S.energy -= d.cost;
+  S.playedAny = true;
+  S.hand.splice(idx, 1);
+  flyOut(uid);
+  if (d.cost) { els.energy.classList.remove('flash'); void els.energy.offsetWidth; els.energy.classList.add('flash'); }
+  render();
+
+  const actor = actorOf(d);
+  const casters = d.actor === 'both' ? aliveHeroes() : [actor];
+  if (d.spray && target) for (const h of casters) spray(h, target);
+  await Promise.all(casters.map(h => anim(h, d.type === 'attack' ? 'attack' : 'skill')));
+  for (const e of d.fx) await applyFx(e, actor, target);
+  (d.exhaust ? S.exhaust : S.discard).push(c);
+
+  busy = false;
+  if (checkEnd()) return;
+  render();
+}
+
+function flyOut(uid) {
+  const el = handEls.get(uid);
+  if (!el) return;
+  handEls.delete(uid);
+  el.classList.remove('dragging');
+  el.classList.add('leaving');
+  const x = els.hand.clientWidth / 2 - el.offsetWidth / 2, y = -el.offsetHeight * 1.05;
+  el.style.zIndex = 300;
+  el.style.transform = `translate(${x}px, ${y}px) scale(1.1)`;
+  el.style.opacity = '0';
+  setTimeout(() => el.remove(), 400);
+}
+function flyToDiscard(uid, delay) {
+  const el = handEls.get(uid);
+  if (!el) return;
+  handEls.delete(uid);
+  el.classList.add('leaving');
+  setTimeout(() => {
+    const p = pileOffset(els.discardPile, el);
+    el.style.transform = `translate(${p.x}px, ${p.y}px) rotate(25deg) scale(.3)`;
+    el.style.opacity = '0';
+    setTimeout(() => el.remove(), 420);
+  }, delay);
+}
+function pulse(el) { el.classList.remove('pulse'); void el.offsetWidth; el.classList.add('pulse'); }
+
+async function drawCards(n) {
+  for (let i = 0; i < n; i++) {
+    if (S.hand.length >= MAX_HAND) break;
+    if (!S.draw.length) {
+      if (!S.discard.length) break;
+      S.draw = shuffle(S.discard);
+      S.discard = [];
+      pulse(els.drawPile); pulse(els.discardPile);
+      renderHUD();
+      await wait(260);
+    }
+    S.hand.push(S.draw.pop());
+    renderHand();
+    renderHUD();
+    await wait(85);
+  }
+}
+
+async function startPlayerTurn() {
+  S.phase = 'player';
+  S.energy = S.maxEnergy;
+  for (const h of S.heroes) h.block = 0;
+  render();
+  await banner(`${S.turn}턴 · 내 차례`);
+  await drawCards(HAND_SIZE);
+}
+
+async function endTurn() {
+  if (busy || S.phase !== 'player') return;
+  busy = true;
+  selected = null; hoverUid = null;
+  setAim(null); hideTip();
+  S.hand.forEach((c, i) => flyToDiscard(c.uid, i * 45));
+  S.discard.push(...S.hand);
+  S.hand = [];
+  for (const h of S.heroes) if (h.weak > 0) h.weak--;
+  S.phase = 'enemy';
+  render();
+  await wait(300);
+  await banner('벌레들의 차례', 'enemy');
+
+  for (const en of S.enemies) {
+    if (en.hp <= 0) continue;
+    en.block = 0;
+    renderUnits();
+    await enemyAct(en);
+    if (checkEnd()) { busy = false; return; }
+    await wait(260);
+  }
+  for (const en of S.enemies) {
+    if (en.weak > 0) en.weak--;
+    if (en.hp > 0) rollIntent(en);
+  }
+  S.turn++;
+  await startPlayerTurn();
+  busy = false;
+  render();
+}
+
+async function enemyAct(en) {
+  const m = moveOf(en);
+  const targetId = targetIdOf(en);
+  en.history.push(en.intent.move);
+  await anim(en, m.dmg ? 'attack' : 'buff');
+  if (m.dmg) {
+    for (let i = 0; i < (m.hits || 1); i++) {
+      const targets = m.all ? aliveHeroes() : [hero(targetId)].filter(h => h && h.hp > 0);
+      for (const h of targets) damage(h, attackValue(en, m.dmg));
+      renderUnits();
+      await wait(230);
+    }
+    const h = targetId && hero(targetId);
+    if (m.weak && h && h.hp > 0) { h.weak += m.weak; floatText(h, `약화 ${m.weak}`, 'debuff'); }
+  }
+  if (m.block) gainBlock(en, m.block);
+  if (m.str) { en.str += m.str; floatText(en, `힘 +${m.str}`, 'buff'); }
+  renderUnits();
+  await wait(200);
+}
+
+function checkEnd() {
+  if (S.phase === 'win' || S.phase === 'lose') return true;
+  const won = aliveEnemies().length === 0, lost = aliveHeroes().length === 0;
+  if (!won && !lost) return false;
+  S.phase = won ? 'win' : 'lose';
+  busy = false;
+  selected = null;
+  S.hand.forEach((c, i) => flyToDiscard(c.uid, i * 40));
+  render();
+  setTimeout(() => showEnd(won), 900);
+  return true;
+}
+
+/* =====================================================================
+   INPUT
+   ===================================================================== */
+function selectCard(uid) {
+  selected = uid;
+  hideTip();
+  render();
+}
+function deselect() {
+  if (!selected) return;
+  selected = null;
+  setAim(null);
+  render();
+}
+function onCardTap(uid) {
+  if (busy || S.phase !== 'player') return;
+  const c = S.hand.find(x => x.uid === uid);
+  if (!c) return;
+  if (selected !== uid) { selectCard(uid); return; }
+  if (!playable(c)) { updateHint(blockReason(c), true); return; }
+  if (CARDS[c.id].target === 'enemy') {
+    const alive = aliveEnemies();
+    if (alive.length === 1) playCard(uid, alive[0].uid);
+    else updateHint('공격할 적을 누르세요');
+  } else playCard(uid);
+}
+function onUnitTap(uid) {
+  const en = S.enemies.find(e => e.uid === uid);
+  const c = selected && S.hand.find(x => x.uid === selected);
+  if (en && en.hp > 0 && c && CARDS[c.id].target === 'enemy') {
+    if (playable(c)) playCard(c.uid, en.uid);
+    else updateHint(blockReason(c), true);
+    return;
+  }
+  showTip(uid);
+}
+function enemyAt(x, y) {
+  for (const en of aliveEnemies()) {
+    const r = unitEl(en).getBoundingClientRect();
+    if (x >= r.left - 10 && x <= r.right + 10 && y >= r.top - 10 && y <= r.bottom + 10) return en;
+  }
+  return null;
+}
+
+function bindInput() {
+  els.hand.addEventListener('pointerdown', e => {
+    const el = e.target.closest('.card');
+    if (!el || el.classList.contains('leaving') || busy || S.phase !== 'player') return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    drag = { uid: el.dataset.uid, el, x0: e.clientX, y0: e.clientY, id: e.pointerId, moved: false };
+    try { el.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+  });
+  els.hand.addEventListener('pointermove', e => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const dx = e.clientX - drag.x0, dy = e.clientY - drag.y0;
+    if (!drag.moved) {
+      if (Math.hypot(dx, dy) < 10) return;
+      drag.moved = true;
+      if (selected !== drag.uid) selectCard(drag.uid);
+      drag.el.classList.add('dragging');
+      hoverUid = null;
+    }
+    const c = S.hand.find(x => x.uid === drag.uid);
+    const targeted = c && CARDS[c.id].target === 'enemy';
+    const hr = els.hand.getBoundingClientRect();
+    const cw = drag.el.offsetWidth, ch = drag.el.offsetHeight;
+    const s = targeted ? 0.75 : 1;
+    const tx = e.clientX - hr.left - cw / 2;
+    const ty = targeted ? e.clientY - 14 - hr.bottom : e.clientY + ch / 2 - hr.bottom;
+    drag.el.style.transform = `translate(${tx}px, ${ty}px) scale(${s})`;
+    if (targeted) setAim(enemyAt(e.clientX, e.clientY));
+  });
+  const finish = (e, cancelled) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const d = drag;
+    drag = null;
+    if (!d.moved) { if (!cancelled) onCardTap(d.uid); return; }
+    d.el.classList.remove('dragging');
+    setAim(null);
+    const c = S.hand.find(x => x.uid === d.uid);
+    if (!cancelled && c && playable(c)) {
+      if (CARDS[c.id].target === 'enemy') {
+        const en = enemyAt(e.clientX, e.clientY);
+        if (en) { playCard(c.uid, en.uid); return; }
+      } else if (e.clientY < els.hand.getBoundingClientRect().top - 20) {
+        playCard(c.uid);
+        return;
+      }
+    }
+    render();
+  };
+  els.hand.addEventListener('pointerup', e => finish(e, false));
+  els.hand.addEventListener('pointercancel', e => finish(e, true));
+
+  els.hand.addEventListener('pointerover', e => {
+    if (e.pointerType !== 'mouse' || drag) return;
+    const uid = e.target.closest('.card')?.dataset.uid || null;
+    if (uid !== hoverUid) { hoverUid = uid; layoutHand(); }
+  });
+  els.hand.addEventListener('pointerleave', () => { if (hoverUid) { hoverUid = null; layoutHand(); } });
+
+  els.field.addEventListener('click', e => {
+    const u = e.target.closest('.unit');
+    if (u) { onUnitTap(u.dataset.uid); return; }
+    hideTip();
+    deselect();
+  });
+  els.field.addEventListener('pointerover', e => {
+    if (e.pointerType !== 'mouse' || drag) return;
+    const u = e.target.closest('.unit');
+    if (u) showTip(u.dataset.uid, true);
+  });
+  els.field.addEventListener('pointerout', e => {
+    if (e.pointerType === 'mouse' && e.target.closest('.unit') && !e.relatedTarget?.closest?.('.unit')) hideTip();
+  });
+  els.field.addEventListener('animationend', e => {
+    if (e.target.classList.contains('sprite-wrap')) e.target.classList.remove('a-attack', 'a-skill', 'a-buff', 'a-hit');
+    if (e.target === els.field) els.field.classList.remove('quake');
+  });
+  els.dock.addEventListener('click', e => { if (!e.target.closest('.card, button')) deselect(); });
+
+  els.endTurn.addEventListener('click', endTurn);
+  els.drawPile.addEventListener('click', () => showPile('draw'));
+  els.discardPile.addEventListener('click', () => showPile('discard'));
+  els.menuBtn.addEventListener('click', showMenu);
+  els.modal.addEventListener('click', e => {
+    const act = e.target.closest('[data-action]')?.dataset.action;
+    if (act === 'close' || (e.target === els.modal && els.modal.dataset.dismiss === '1')) closeModal();
+    if (act === 'restart') { closeModal(); startBattle(); }
+  });
+
+  document.addEventListener('keydown', e => {
+    if (!els.modal.hidden) { if (e.key === 'Escape' && els.modal.dataset.dismiss === '1') closeModal(); return; }
+    if (e.key === 'Escape') deselect();
+    else if (e.key === 'e' || e.key === 'E') endTurn();
+    else if (/^[1-9]$/.test(e.key)) { const c = S.hand[+e.key - 1]; if (c) onCardTap(c.uid); }
+    else if (e.key === 'Enter' && document.activeElement?.classList.contains('card')) onCardTap(document.activeElement.dataset.uid);
+  });
+  document.addEventListener('contextmenu', e => { if (e.target.closest('.game')) e.preventDefault(); });
+  document.addEventListener('touchmove', e => { if (!e.target.closest('.sheet')) e.preventDefault(); }, { passive: false });
+
+  let resizeTimer = 0;
+  window.addEventListener('resize', () => {
+    layoutHand();
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(paintBackground, 120);
+  });
+}
+
+/* ---------- tooltip ---------- */
+function showTip(uid, hover = false) {
+  const f = [...S.heroes, ...S.enemies].find(x => x.uid === uid);
+  if (!f) return;
+  const enemy = isEnemy(f);
+  const name = enemy ? ENEMIES[f.kind].name : HEROES[f.id].name;
+  const lines = [`<b>${name}</b> · 체력 ${f.hp}/${f.maxHp}`];
+  if (enemy && f.hp > 0 && f.intent) lines.push(intentText(f));
+  if (!enemy && f.hp <= 0) lines.push('기절했어요. 이 캐릭터의 카드는 못 써요.');
+  if (!enemy && f.hp > 0 && S.phase === 'player') { const n = incomingFor(f); if (n) lines.push(`이번 벌레 턴에 받을 피해 ${n}`); }
+  lines.push(...statusLines(f));
+  els.tip.innerHTML = lines.join('<br>');
+  els.tip.hidden = false;
+  const fr = els.field.getBoundingClientRect(), ur = unitEl(f).getBoundingClientRect();
+  const tw = els.tip.offsetWidth, th = els.tip.offsetHeight;
+  let x = ur.left - fr.left + ur.width / 2 - tw / 2;
+  x = Math.max(8, Math.min(fr.width - tw - 8, x));
+  let y = ur.top - fr.top - th - 6;
+  if (y < 8) y = Math.min(fr.height - th - 8, ur.bottom - fr.top + 6);
+  els.tip.style.left = x + 'px';
+  els.tip.style.top = Math.max(8, y) + 'px';
+  clearTimeout(tipTimer);
+  if (!hover) tipTimer = setTimeout(hideTip, 3200);
+}
+function hideTip() { els.tip.hidden = true; clearTimeout(tipTimer); }
+
+/* ---------- modals ---------- */
+function openModal(html, dismissable = true) {
+  els.modalBody.innerHTML = html;
+  els.modal.dataset.dismiss = dismissable ? '1' : '0';
+  els.modal.hidden = false;
+}
+function closeModal() { els.modal.hidden = true; }
+
+function showPile(which) {
+  const pile = which === 'draw' ? S.draw : S.discard;
+  const counts = {};
+  for (const c of pile) counts[c.id] = (counts[c.id] || 0) + 1;
+  const ids = Object.keys(counts).sort((a, b) => CARDS[a].cost - CARDS[b].cost || CARDS[a].name.localeCompare(CARDS[b].name, 'ko'));
+  const rows = ids.map(id => {
+    const d = CARDS[id];
+    return `<li class="a-${d.actor}"><span class="m-cost">${d.cost}</span><span class="m-name">${d.name}</span><span class="m-n">×${counts[id]}</span>
+      <span class="m-desc">${ACTOR_LABEL[d.actor]} · ${cardText(d, actorOf(d))}</span></li>`;
+  }).join('');
+  const exhausted = S.exhaust.length ? `<p class="sub">소멸: ${S.exhaust.map(c => CARDS[c.id].name).join(', ')}</p>` : '';
+  openModal(`<h2>${which === 'draw' ? '뽑을 카드' : '버린 카드'} ${pile.length}장</h2>
+    ${which === 'draw' ? '<p class="sub">순서는 섞여 있어요. 다 떨어지면 버린 카드를 다시 섞어요.</p>' : ''}
+    ${rows ? `<ul class="pile-list">${rows}</ul>` : '<p class="sub">비어 있어요.</p>'}
+    ${exhausted}
+    <div class="row"><button class="btn ghost" data-action="close" type="button">닫기</button></div>`);
+}
+function showMenu() {
+  openModal(`<h2>작전 메모</h2>
+    <ul class="help">
+      <li>카드를 눌러 고른 뒤, 공격 카드는 적을 눌러서 써요. 끌어다 놓아도 돼요.</li>
+      <li>적 머리 위가 다음 행동이에요. 🗡️ 공격 · 🛡️ 방어 · 💪 강화 · 🌀 약화. 옆 얼굴이 맞을 캐릭터예요.</li>
+      <li>우리 편 머리 위 빨간 숫자는 이번에 받을 피해예요. 방어도로 막아요.</li>
+      <li>소녀 카드는 소녀가, 알파카 카드는 알파카가 써요. 기절하면 그 카드는 못 써요.</li>
+      <li>방어도는 내 턴이 시작되면 사라져요. 약화는 주는 피해가 25% 줄어요.</li>
+    </ul>
+    <div class="row">
+      <button class="btn ghost" data-action="restart" type="button">처음부터</button>
+      <button class="btn" data-action="close" type="button">계속 싸우기</button>
+    </div>
+    <p class="ver">v0.2 · HAWAII-MANOA · 픽셀 그림 PixelLab</p>`);
+}
+function showEnd(won) {
+  const st = `${S.turn}턴 · 입힌 피해 ${S.stats.dealt} · 받은 피해 ${S.stats.taken}`;
+  openModal(won
+    ? `<h2>퇴치 완료!</h2><p>마노아 집에 평화가 찾아왔어요. 알파카가 뿌듯해합니다.</p><p class="stats">${st}</p>
+       <div class="row"><button class="btn" data-action="restart" type="button">한 판 더</button></div>`
+    : `<h2 class="lose">집을 빼앗겼다…</h2><p>벌레들이 거실을 점령했어요. 레이드를 더 챙겨서 다시 가요.</p><p class="stats">${st}</p>
+       <div class="row"><button class="btn" data-action="restart" type="button">다시 도전</button></div>`, false);
+}
+
+/* =====================================================================
+   BACKGROUND — Manoa valley painted at low resolution, scaled up pixelated
+   ===================================================================== */
+function mulberry32(a) {
+  return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+}
+function paintBackground() {
+  const fr = els.field.getBoundingClientRect();
+  if (fr.width < 10 || fr.height < 10) return;
+  const px = fr.width < 700 ? 3 : 4;
+  const W = Math.ceil(fr.width / px), H = Math.ceil(fr.height / px);
+  const cv = els.bg;
+  cv.width = W; cv.height = H;
+  const g = cv.getContext('2d');
+  const rnd = mulberry32(808);
+  const R = (a, b) => a + rnd() * (b - a);
+  const rect = (x, y, w, h, c) => { g.fillStyle = c; g.fillRect(Math.round(x), Math.round(y), Math.max(1, Math.round(w)), Math.max(1, Math.round(h))); };
+  const blob = (cx, cy, rx, ry, c) => {
+    g.fillStyle = c; rx = Math.max(1, Math.round(rx)); ry = Math.max(1, Math.round(ry)); cx = Math.round(cx); cy = Math.round(cy);
+    for (let dy = -ry; dy <= ry; dy++) { const hw = Math.round(rx * Math.sqrt(1 - (dy * dy) / (ry * ry))); g.fillRect(cx - hw, cy + dy, hw * 2 + 1, 1); }
+  };
+  const smooth = (a, b, t) => { const s = Math.min(1, Math.max(0, (t - a) / (b - a))); return s * s * (3 - 2 * s); };
+
+  // must match the @container (max-aspect-ratio:5/6) rule: a tall field puts the path higher so the back row stands on it
+  const tall = H / W >= 1.2;
+  const horizon = Math.round(H * (tall ? 0.27 : 0.42)), shore = Math.round(H * (tall ? 0.35 : 0.52)), ground = Math.round(H * (tall ? 0.49 : 0.66));
+  const peak = tall ? 0.24 : 0.36;
+
+  // sky — banded gradient with a checker dither at each band edge
+  const sky = ['#4b9bd6', '#5ea8dc', '#72b5e1', '#88c2e5', '#9ecde9', '#b4d9ed', '#c9e4f0', '#dcedf2'];
+  for (let y = 0; y < horizon; y++) {
+    const t = y / horizon * sky.length, i = Math.min(sky.length - 1, Math.floor(t));
+    rect(0, y, W, 1, sky[i]);
+    if (t - i > 0.72 && i + 1 < sky.length) { g.fillStyle = sky[i + 1]; for (let x = y & 1; x < W; x += 2) g.fillRect(x, y, 1, 1); }
+  }
+  // rainbow over the valley
+  const rcx = W * 0.57, rcy = shore, r0 = Math.min(H * 0.5, W * 0.45), bw = Math.max(1, r0 * 0.026);
+  const bands = ['#e85a4f', '#f29a3c', '#f5d34c', '#6cc06a', '#4f9fd8', '#8a6cc9'];
+  g.globalAlpha = 0.4;
+  for (let y = Math.floor(rcy - r0); y < horizon; y++) {
+    for (let x = Math.floor(rcx - r0); x < rcx + r0; x++) {
+      const k = Math.floor((r0 - Math.hypot(x - rcx, y - rcy)) / bw);
+      if (k >= 0 && k < bands.length) { g.fillStyle = bands[k]; g.fillRect(x, y, 1, 1); }
+    }
+  }
+  g.globalAlpha = 1;
+  // clouds
+  for (let i = 0; i < 6; i++) {
+    const cx = R(0, W), cy = R(H * 0.05, H * 0.27), s = R(0.7, 1.3) * H * 0.032;
+    blob(cx, cy + s * 0.55, s * 2.7, s * 0.7, '#cfe3ee');
+    blob(cx - s * 1.2, cy, s * 1.3, s, '#ffffff');
+    blob(cx + s * 0.4, cy - s * 0.4, s * 1.5, s * 1.25, '#ffffff');
+    blob(cx + s * 1.7, cy + s * 0.15, s * 1.1, s * 0.8, '#ffffff');
+  }
+  // ocean
+  rect(0, horizon, W, shore - horizon + 2, '#2f7fb6');
+  rect(0, horizon, W, 1, '#6db3d6');
+  for (let i = 0; i < W * 0.5; i++) rect(R(0, W), R(horizon + 2, shore), R(1, 3), 1, rnd() < 0.5 ? '#4d9cc9' : '#8cc8e2');
+  // Diamond Head on the right of the shore
+  for (let x = Math.floor(W * 0.8); x < W; x++) {
+    const t = (x - W * 0.8) / (W * 0.2);
+    const h = H * 0.075 * Math.pow(Math.sin(Math.min(1, t * 1.15) * Math.PI), 0.5);
+    rect(x, shore - h, 1, h + 1, x % 3 ? '#8c9a6f' : '#7d8c63');
+  }
+  // Ko'olau ridge — fluted cliffs on the left, falling off toward the city
+  const ridgeTop = x => {
+    const t = x / W;
+    const base = H * peak * (1 - smooth(0.3, 0.72, t)) + H * 0.01;
+    const jag = Math.sin(x * 0.19) * 1.5 + Math.sin(x * 0.061 + 1.3) * 3 + Math.sin(x * 0.47) * 0.8;
+    return Math.round(shore - base - jag);
+  };
+  for (let x = 0; x < W; x++) {
+    const top = ridgeTop(x);
+    if (top >= shore) continue;
+    const flute = Math.sin(x * 0.9 + Math.sin(x * 0.17) * 2.2);
+    rect(x, top, 1, ground - top, flute > 0.3 ? '#5f9270' : flute < -0.5 ? '#3f7356' : '#4e8462');
+    rect(x, top, 1, 1, '#86b48c');
+  }
+  // Honolulu along the shore, taller toward Waikiki
+  rect(W * 0.42, shore, W * 0.58, ground - shore, '#4c815a');
+  for (let x = Math.floor(W * 0.46); x < W * 0.84; x += 2) {
+    const t = x / W;
+    const h = Math.round(R(1, 3) + 7 * Math.exp(-(((t - 0.72) / 0.07) ** 2)));
+    rect(x, shore + 1 - h, 2, h + 1, ['#ece7dc', '#cfd6d9', '#f4f1e8', '#b8c2c6'][Math.floor(rnd() * 4)]);
+  }
+  for (let i = 0; i < W * 0.4; i++) rect(R(W * 0.42, W), R(shore + 2, ground), 2, 1, rnd() < 0.5 ? '#3d6f47' : '#5a925c');
+  // near valley wall
+  for (let x = 0; x < W * 0.5; x++) {
+    const t = x / W;
+    const top = Math.round(shore + H * 0.02 - H * 0.17 * (1 - smooth(0.04, 0.46, t)) + Math.sin(x * 0.3) * 1.2);
+    rect(x, top, 1, ground - top, '#2f6a47');
+    if (rnd() < 0.5) rect(x, top, 1, 1, '#3f8257');
+  }
+  // Manoa Falls
+  const wx = Math.round(W * 0.2), wTop = ridgeTop(wx) + Math.round(H * 0.09), wBot = ground - Math.round(H * 0.06);
+  for (let y = wTop; y < wBot; y++) { rect(wx, y, 3, 1, y % 3 ? '#e8f6fb' : '#b7def0'); rect(wx + 3, y, 1, 1, '#8fc6dd'); }
+  blob(wx + 1.5, wBot, 6, 2, '#d8eef5');
+  // bush line along the path
+  for (let x = 0; x < W; x += 3) {
+    blob(x + R(-1, 1), ground - R(1, 3), R(3, 6), R(2, 4), ['#244f33', '#2d6340', '#3a7a4b'][Math.floor(rnd() * 3)]);
+    if (rnd() < 0.18) rect(x, ground - R(2, 5), 1, 1, rnd() < 0.6 ? '#e2493a' : '#f7e1a0');
+  }
+  // jungle framing both edges
+  const foliage = (x0, x1, top) => {
+    for (let i = 0; i < (x1 - x0) * 1.2; i++) {
+      const x = R(x0, x1), y = R(top, ground);
+      blob(x, y, R(3, 8), R(2, 5), ['#1b432a', '#235638', '#2f6b43', '#3c7f4d'][Math.floor(rnd() * 4)]);
+    }
+  };
+  foliage(-6, W * 0.1, H * 0.1);
+  foliage(W * 0.9, W + 6, H * 0.06);
+  // cobblestone path
+  rect(0, ground, W, H - ground, '#4a3d33');
+  for (let y = ground + 1; y < H;) {
+    const t = (y - ground) / (H - ground), sh = Math.round(1.5 + t * 4);
+    for (let x = -Math.round(R(0, 6)); x < W;) {
+      const sw = Math.round(sh * R(1.6, 2.6));
+      rect(x + 1, y, sw - 1, sh, ['#6f5d4b', '#665443', '#7a6852', '#5d4c3c'][Math.floor(rnd() * 4)]);
+      rect(x + 1, y, sw - 1, 1, '#8a7660');
+      x += sw + 1;
+    }
+    y += sh + 1;
+  }
+  for (let x = 0; x < W; x++) if (rnd() < 0.5) rect(x, ground - 1, 1, R(1, 3), rnd() < 0.5 ? '#3f7d3f' : '#5a9a48');
+  // palms
+  const palm = (bx, by, h, lean) => {
+    let x = bx, y = by;
+    for (let i = 0; i < h; i++) { const t = i / h; x = bx + lean * h * t * t; y = by - i; rect(x, y, 2, 1, i % 4 === 0 ? '#4a3523' : '#6b4d33'); }
+    const cx = x + 1, cy = y;
+    for (const a of [-170, -140, -112, -70, -40, -12, 15, 165]) {
+      const rad = a * Math.PI / 180, L = h * R(0.32, 0.46);
+      for (let s = 0; s < L; s++) {
+        const t = s / L, lx = cx + Math.cos(rad) * s, ly = cy + Math.sin(rad) * s + t * t * L * 0.55;
+        rect(lx, ly, 2, 1, '#2d7a3c');
+        if (s % 2 === 0) rect(lx, ly + 1, 1, 1, '#1f5a2c');
+        if (s % 3 === 0) rect(lx, ly - 1, 1, 1, '#4fa04f');
+      }
+    }
+    blob(cx, cy + 1, 1.5, 1.5, '#5a3d24');
+  };
+  const ph = Math.min(H * 0.52, W * 0.6);
+  palm(W * 0.05, ground + 3, ph, 0.22);
+  palm(W * 0.95, ground + 4, ph * 1.06, -0.26);
+}
+
+/* =====================================================================
+   BOOT
+   ===================================================================== */
+async function startBattle() {
+  closeModal();
+  busy = true;
+  selected = null; hoverUid = null;
+  for (const el of handEls.values()) el.remove();
+  handEls.clear();
+  S = newState();
+  for (const en of S.enemies) rollIntent(en);
+  buildUnits();
+  render();
+  await startPlayerTurn();
+  busy = false;
+  render();
+}
+
+function boot(data) {
+  for (const id of ['game', 'field', 'bg', 'heroes', 'enemies', 'fx', 'hint', 'banner', 'tip', 'dock', 'hand', 'drawPile', 'discardPile',
+    'drawCount', 'discardCount', 'energy', 'energyNow', 'energyMax', 'endTurn', 'turnNo', 'menuBtn', 'modal', 'modalBody']) els[id] = $(id);
+  bindInput();
+  paintBackground();
+  if (window.ResizeObserver) new ResizeObserver(() => paintBackground()).observe(els.field);
+  requestAnimationFrame(tickSprites);
+
+  const saved = data && data.state;
+  if (saved && saved.v === 1 && saved.phase === 'player') {
+    S = saved;
+    buildUnits();
+    renderHand(false);
+    render();
+  } else {
+    startBattle();
+  }
+  window.claude?.hot?.snapshot?.(() => (S && !busy && S.phase === 'player' ? { state: S } : null));
+}
+
+window.claude?.hot?.ready ? window.claude.hot.ready(boot) : boot(window.claude?.hot?.data ?? {});
+})();
+</script>
+<!-- artifact:end -->
+</body>
+</html>
