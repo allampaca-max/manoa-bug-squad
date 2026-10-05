@@ -10,7 +10,9 @@
 
 ## 실행
 
-빌드 없이 `index.html`과 `sprites/` 폴더로 돌아간다. 파일을 브라우저로 열거나, GitHub Pages로 올리면 폰에서 바로 할 수 있다. 폰에서 "홈 화면에 추가"하면 앱처럼 전체 화면으로 열린다.
+바로 하기: https://allampaca-max.github.io/manoa-bug-squad/ (GitHub Pages, `main`에 푸시하면 1~2분 뒤 반영)
+
+빌드 없이 `index.html`과 `sprites/` 폴더로 돌아간다. 폰에서 "홈 화면에 추가"하면 앱처럼 전체 화면으로 열린다.
 
 ## 밸런스 고치기
 
